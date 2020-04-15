@@ -2,6 +2,7 @@
 #include "minicsv.h"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 
 using namespace mini;
 
@@ -20,4 +21,17 @@ TEST(FileOutputTests, FileOutputTest) {
     std::string actual(sstr.str());
     EXPECT_STREQ("Foo,Bar\n1,2\n\"baz,buz\",3\n", actual.c_str());
     // TODO delete file
+}
+
+TEST(StreamOutputTests, StreamOutputTest) {
+    std::ostringstream buffer;
+    csv::ostream csv_out(buffer);
+    csv_out.set_delimiter(',', "");
+    csv_out << "Foo" << "Bar" << NEWLINE;
+    csv_out << 1 << 2 << NEWLINE;
+    csv_out << "baz,buz" << 3 << NEWLINE;
+    csv_out.close();
+    std::string actual(buffer.str());
+    EXPECT_STREQ("Foo,Bar\n1,2\n\"baz,buz\",3\n", actual.c_str());
+
 }

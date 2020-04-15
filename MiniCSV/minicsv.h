@@ -379,34 +379,20 @@ namespace mini
 			bool allow_blank_line;
 		};
 
-		class ofstream
+		class ostream_base
 		{
 		public:
-
-			ofstream(const std::string& file = "")
-				: after_newline(true)
+            explicit ostream_base(std::ostream& ostm)
+				: ostm_(ostm)
+				, after_newline(true)
 				, delimiter(",")
 				, escape_str("##")
 				, surround_quote_on_str(false)
 				, surround_quote('\"')
 				, quote_escape("&quot;")
 			{
-				open(file);
 			}
-			ofstream(const char * file)
-			{
-				open(file);
-			}
-			void open(const std::string& file)
-			{
-				if (!file.empty())
-					open(file.c_str());
-			}
-			void open(const char * file)
-			{
-				init();
-				ostm.open(file, std::ios_base::out);
-			}
+			virtual ~ostream_base() = default;
 			void init()
 			{
 				after_newline = true;
@@ -418,16 +404,10 @@ namespace mini
 			}
 			void flush()
 			{
-				ostm.flush();
+				ostm_.flush();
 			}
-			void close()
-			{
-				ostm.close();
-			}
-			bool is_open()
-			{
-				return ostm.is_open();
-			}
+			virtual void close() = 0;
+			virtual bool is_open() = 0;
 			void enable_surround_quote_on_str(bool enable, char quote, const std::string& escape = "&quot;")
 			{
 				surround_quote_on_str = enable;
@@ -455,13 +435,9 @@ namespace mini
 			{
 				return after_newline;
 			}
-			std::ofstream& get_ofstream()
-			{
-				return ostm;
-			}
 			void escape_and_output(std::string src)
 			{
-				ostm << ((escape_str.empty()) ? src : replace(src, delimiter, escape_str));
+				ostm_ << ((escape_str.empty()) ? src : replace(src, delimiter, escape_str));
 			}
 			void escape_str_and_output(std::string src)
 			{
@@ -472,15 +448,19 @@ namespace mini
 					{
 						src = replace(src, std::string(1, surround_quote), quote_escape);
 					}
-					ostm << surround_quote << src << surround_quote;
+					ostm_ << surround_quote << src << surround_quote;
 				}
 				else
 				{
-					ostm << src;
+					ostm_ << src;
 				}
 			}
-		private:
-			std::ofstream ostm;
+            std::ostream& get_ofstream()
+            {
+                return ostm_;
+            }
+		protected:
+            std::ostream& ostm_;
 			bool after_newline;
 			std::string delimiter;
 			std::string escape_str;
@@ -489,6 +469,40 @@ namespace mini
 			std::string quote_escape;
 		};
 
+		class ofstream : public ostream_base
+		{
+		public:
+			explicit ofstream(const std::string& file)
+				: ofstm(std::ofstream(file))
+				, ostream_base(ofstm)
+			{
+			}
+			~ofstream() override = default;
+			void close() override
+			{
+				ofstm.close();
+			}
+			bool is_open() override
+			{
+				return ofstm.is_open();
+			}
+		private:
+			std::ofstream ofstm;
+		};
+
+		class ostream : public ostream_base
+        {
+        public:
+            explicit ostream(std::ostream& underlying) : ostream_base(underlying) {}
+            ~ostream() override = default;
+            void close() override
+            {
+            }
+            bool is_open() override
+            {
+                return ostm_.good();
+            }
+        };
 
 	} // ns csv
 } // ns mini
@@ -582,6 +596,8 @@ inline mini::csv::ifstream& operator >> (mini::csv::ifstream& istm, char& val)
 
 	return istm;
 }
+
+// OFSTREAM OPERATOR OVERLOADS - START
 
 template<typename T>
 mini::csv::ofstream& operator << (mini::csv::ofstream& ostm, const T& val)
@@ -688,6 +704,122 @@ inline mini::csv::ofstream& operator << (mini::csv::ofstream& ostm, const char* 
 
 	return ostm;
 }
+
+// OFSTREAM OPERATOR OVERLOADS - END
+
+// OSTREAM OPERATOR OVERLOADS - START
+
+template<typename T>
+mini::csv::ostream& operator << (mini::csv::ostream& ostm, const T& val)
+{
+    if(!ostm.get_after_newline())
+        ostm.get_ofstream() << ostm.get_delimiter();
+
+    std::ostringstream os_temp;
+
+    os_temp << val;
+
+    ostm.escape_and_output(os_temp.str());
+
+    ostm.set_after_newline(false);
+
+    return ostm;
+}
+
+template<typename T>
+mini::csv::ostream& operator << (mini::csv::ostream& ostm, const T* val)
+{
+    if (!ostm.get_after_newline())
+        ostm.get_ofstream() << ostm.get_delimiter();
+
+    std::ostringstream os_temp;
+
+    os_temp << *val;
+
+    ostm.escape_and_output(os_temp.str());
+
+    ostm.set_after_newline(false);
+
+    return ostm;
+}
+
+template<>
+inline mini::csv::ostream& operator << (mini::csv::ostream& ostm, const std::string& val)
+{
+    if (!ostm.get_after_newline())
+        ostm.get_ofstream() << ostm.get_delimiter();
+
+    std::string temp = val;
+    ostm.escape_str_and_output(temp);
+
+    ostm.set_after_newline(false);
+
+    return ostm;
+}
+
+template<>
+inline mini::csv::ostream& operator << (mini::csv::ostream& ostm, const mini::csv::sep& val)
+{
+    ostm.set_delimiter(val.get_delimiter(), val.get_escape());
+
+    return ostm;
+}
+
+template<>
+inline mini::csv::ostream& operator << (mini::csv::ostream& ostm, const char& val)
+{
+    if(val==NEWLINE)
+    {
+        ostm.get_ofstream() << NEWLINE;
+
+        ostm.set_after_newline(true);
+    }
+    else
+    {
+        if (!ostm.get_after_newline())
+            ostm.get_ofstream() << ostm.get_delimiter();
+
+        std::string temp = "";
+        temp += val;
+        ostm.escape_str_and_output(temp);
+
+        ostm.set_after_newline(false);
+    }
+
+    return ostm;
+}
+
+inline mini::csv::ostream& operator << (mini::csv::ostream& ostm, mini::csv::NChar val)
+{
+    if (!ostm.get_after_newline())
+        ostm.get_ofstream() << ostm.get_delimiter();
+
+    std::ostringstream os_temp;
+
+    os_temp << static_cast<int>(val.getChar());
+
+    ostm.escape_and_output(os_temp.str());
+
+    ostm.set_after_newline(false);
+
+    return ostm;
+}
+
+template<>
+inline mini::csv::ostream& operator << (mini::csv::ostream& ostm, const char* val)
+{
+    const std::string temp = val;
+
+    ostm << temp;
+
+    return ostm;
+}
+
+// OSTREAM OPERATOR OVERLOADS - END
+
+
+
+
 
 namespace mini
 {
